@@ -1,3 +1,4 @@
+        
 .New_Osargs
         CMP     #$00
         BNE     Try_Args
@@ -49,9 +50,7 @@
 
 
 .New_Osfsc
-		STA     save_a
-        STY     save_x             \ x and y are wrong way round in electron.asm!!
-        STX     save_y
+		JSR     Save_axy
         
         CMP     #$05
         BEQ     Do_Cat
@@ -64,7 +63,7 @@
         
 .Leave_Osfsc
         LDY     #LO(osfscvec)+1        
-        JMP     Leave_New_Osf
+        JMP     Leave_Default_Vecs
 
 .Do_Cat
         LDY     #$00
@@ -84,7 +83,27 @@
         CLV
         JSR     New_Cat
         JMP     Leave_Osfile
+
+.New_Osfind
+        JSR     Save_axy
+        CMP     #$00
+        BEQ     Default_Osfind               \ pass A=0, close file
+        STX     wrzp
+        STY     wrzp+1
+        LDY     #$00
+        JSR     Get_Filename2
+        SEC
+        JSR     Bit_New_Cat
         
+        
+        BVC     Default_Osfind               \ check if file exists and is not deleted
+        LDA     #$00
+        JMP     Leave_Osfile2                \ leave with A=0
+
+.Default_Osfind
+        LDY     #LO(osfindvec)+1        
+        JMP     Leave_Default_Vecs            \ pass call to default RFS routine
+
 .Osfile_5FF
         PHA
         JSR     Get_Filename
@@ -116,15 +135,17 @@
 .Osfile_Delete
         JSR     Get_Filename
         CLC
-        BIT     AnRTS        
-        JSR     New_Cat
+        JSR     Bit_New_Cat
         JMP     Leave_Osfile1
-        
-.New_Osfile
+
+.Save_axy
 		STA     save_a
         STY     save_x             \ x and y are wrong way round in electron.asm!!
         STX     save_y
+        RTS
         
+.New_Osfile
+        JSR     Save_axy
         CMP     #$06
         BEQ     Osfile_Delete
         CMP     #$05
@@ -137,7 +158,7 @@
 .Default_Osfile
         LDY     #LO(osfvec)+1
         
-.Leave_New_Osf
+.Leave_Default_Vecs
         LDA     vectabaddr
         STA     wrzp
         LDA     vectabaddr+1
@@ -211,8 +232,7 @@
         TXA
         PHA
         CLC
-        BIT     AnRTS
-        JSR     New_Cat            \ delete previous version
+        JSR     Bit_New_Cat            \ delete previous version
         PLA
         TAX
 

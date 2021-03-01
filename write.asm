@@ -213,23 +213,26 @@
         PLP
 .Delete_End
         RTS
+
+.Bit_New_Cat
+        BIT     AnRTS
         
 .New_Cat 
         PHP                  \ save catalogue flag, c, and delete flag v
         LDA     #heappage
         STA     pagereg
         JSR    Check_Start   \ check rstart still valid
-        
-        LDA    rstart
-        STA    rfsptr
-        LDA    rstart+1
-        STA    rfsptr+1
-        
+ 
+        LDY    #$01
+
+.Cat_Loop1
+        LDA    rstart,Y
+        STA    rfsptr,Y      \ set pointer to start of files
         LDA    #$00
-        STA    $100
-        STA    $101          \ clear deleted count
-        STA    delsp
-        STA    delsp+1       \ clear deleted space count
+        STA    $100,Y        \ clear deleted count
+        STA    delsp,Y       \ clear dead space count
+        DEY
+        BPL    Cat_Loop1     \ -7
 
 .Find_Loop1
         JSR    Update_And_Read_Byte

@@ -90,6 +90,8 @@
         ext_osfile  = (LO(osfvec)/2)*3
         argsvec     = $214
         ext_args    = (LO(argsvec)/2)*3
+        osfindvec   = $21C
+        ext_osfind  = (LO(osfindvec)/2)*3
         osfscvec    = $21E
         ext_osfsc   = (LO(osfscvec)/2)*3
         extvectab   = $D9F                 \ base for storage of extended vectors
@@ -97,7 +99,7 @@
         
         osfile      = $FFDD
         osargs      = $FFDA
-        osfind      = $FFCE
+\        osfind      = $FFCE
         
         tubeID      = $F6                  \ ID to use to claim/release tube
         myFSno      = $33                  \ filing system handle to initialise WRFS

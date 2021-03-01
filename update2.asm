@@ -38,14 +38,6 @@
         
         JMP     Recovery_Return-$8000+dload
         
-.Leave_Update2
-        PLA
-        TAY
-        LDX     $F4
-        PLA
-        LDA     #$00
-        RTS
-
 .Update_Flag
         EQUB    $00                   \ will be set to non zero by recovery code
         
@@ -71,6 +63,14 @@
         CLC
         BCC     Etag_Loop
         
+.Leave_Update2
+        PLA
+        TAY
+        LDX     $F4
+        PLA
+        LDA     #$00
+        RTS
+
 .Etag_Done
         LDA     crc16
         STA     etagram
@@ -80,6 +80,9 @@
         LDA     #heappage
         STA     pagereg
         
+        LDA     Update_Flag-$8000+dload
+        BNE     Go_For_Update
+
         LDA     etagram
         ORA     etagram+1
         BEQ     Go_For_Update
@@ -201,7 +204,7 @@
 .Wifi_Slot_Found
         INX
         STX     $F4
-        JMP     Go_For_Update-$8000+dload
+        JMP     Update2-$8000+dload
         
         
 .Recovery_Return
