@@ -1,3 +1,7 @@
+\ ROM Filing System for Electron Wifi Board
+\ (C) 2021 John Wike
+
+Based on:
 \ Electron Wifi Sideway ROM
 \ Settings, definitions and constants
 
@@ -99,7 +103,6 @@
         
         osfile      = $FFDD
         osargs      = $FFDA
-\        osfind      = $FFCE
         
         tubeID      = $F6                  \ ID to use to claim/release tube
         myFSno      = $33                  \ filing system handle to initialise WRFS

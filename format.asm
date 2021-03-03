@@ -1,26 +1,25 @@
+\ ROM Filing System for Electron Wifi Board
+\ (C) 2021 John Wike
+
+\ copied from:
+
 \ Flash routine to reprogram the EEPROM.
 \ (c) 2020 Roland Leurs
 \ Version 1.0 14-08-2020
 \
-\ This code will be included in the EEPROM but is copied to the main memory before it is executed. You can copy it
-\ by executing the WiFi driver function &FE where the Y register contains the high byte of the data to be "burned"
-\ into the EEPROM and the X register contains the bank number within the EEPROM. Always the full 16kB will be "burned".
+\ and modified
 \
-\ Bank 0:   &0000 - &3FFF       mfa = 1     bank = 0
+\ Bank 0:   &0000 - &3FFF       mfa = 1     bank = 0  the first two banks are the "hidden" banks used by the filing system
 \ Bank 1:   &4000 - &7FFF       mfa = 1     bank = 1
-\ Bank 2:   &8000 - &BFFF       mfa = 0     bank = 0
-\ Bank 3:   &C000 - &FFFF       mfa = 0     bank = 1
+\ Bank 2:   &8000 - &BFFF       mfa = 0     bank = 0  this is the bank that the Electron Wifi ROM occupies
+\ Bank 3:   &C000 - &FFFF       mfa = 0     bank = 1  the first sector $8000 to $9000 is program area, the rest is filing system
 \ 
-\ After the programming has finished the Electron will be hard reset because one of the ROMs will have changed and
-\ the operating system needs to be reinitialized. Luckily, a reboot on the Electron does not take as much time as
-\ rebooting a PC ;-)
-
-\ modified to just erase file system portions of the EPROM, ie, $9000 to $BFFF of Bank 1 and $8000 to $BFFF of Banks 2 and 3
+\ If X=3 on entry, the parts of the EEPROM that are used as filing system will be erased, ie. $9000 to $BFFF in Bank 3 and
+\ $8000 to $BFFF in Banks 0 and 1.
+\ If X <> 3 on entry the program area at $8000 to $8FFF will be erased and then updated through the rw code 
 
 \ Workspace
 include "electron.asm"
-\mfatabl  = zp+8                \ 4 bytes
-\banktabl = zp+12               \ 4 bytes
 
 \ UART registers
 uart_thr = uart+8
@@ -30,72 +29,71 @@ uart_afr = uart+10
 uart_lcr = uart+11
 uart_mcr = uart+12
 
-            org formatcode
+            org formatcode     \ code will be copied to $FD00 and run from there
+            
+            
 .Format_Start            
             JMP     Format
-            
+                        
 .Jmp_To_Rwpage
-            STA     pagereg    \ this will jump to rw page location 6
+            STA     pagereg    \ when updating WRFS this will cause a jump to the rw code page at $FD06
 
 .mfatabl
-            EQUB    8,8,0,0
+            EQUB    8,8,0,0    \ these are the values to be written to uart_mcr for each bank
             
 .banktabl
-            EQUB    0,1,0,1
+            EQUB    0,1,0,1    \ these are the ls bits of the sideways rom slots for each bank
             
 .Format
             PHP
             sei                 \ no more interrupts from here
             
 
-\ Blank the bank (bank number is in X register)
 \ Enter with X=3 to format rfs
-\ Enter with X=4 to erase program ready for update
+\ Enter with X=4 to erase WRFS program ready for update
 
-            CPX     #$03
+            CPX     #$03                        \ if X=3 jump to main loop
             BEQ     Blank_Loop
-            LDX     #$03
+            
+            LDX     #$03                        \ set X=3 and jump to erase program
             STX     save_x
             BNE     Erase_Prog
+            
 .Blank_Loop
             STX     save_x
             CPX     #$02
-            BEQ     Dont_Erase_Main_Rom
-            BCS     Dont_Erase_Program
+            BEQ     Dont_Erase_Main_Rom         \ if X=2 this is the Electron Wifi Rom so dont erase
+            BCS     Dont_Erase_Program          \ if X=3 dont erase the program section
             
 .Erase_Prog
-            jsr prepare_erase   \ prepare the erase operation
-            sta &8000           \ erase first sector
-            jsr wait_star            \ wait for completion
-            ldx save_x
-            LDA     #rwpage
-            cpx #$03
-            beq Jmp_To_Rwpage
+            jsr     prepare_erase               \ prepare the erase operation
+            sta     &8000                       \ erase first sector
+            jsr     wait_star                   \ wait for completion
+            ldx     save_x
+            LDA     #rwpage                     \ prepare for jump to rw page
+            cpx     #$03
+            beq     Jmp_To_Rwpage               \ if X=3 here this is an update operation so jump to rw page       
             
 .Dont_Erase_Program
-            jsr prepare_erase   \ prepare the erase operation
-            sta &9000           \ erase first sector
+            jsr prepare_erase        \ prepare the erase operation
+            sta &9000                \ erase next sector
             jsr wait_star            \ wait for completion
-            jsr prepare_erase   \ prepare the erase operation
-            sta &A000           \ erase first sector
+            jsr prepare_erase        \ prepare the erase operation
+            sta &A000                \ erase next sector
             jsr wait_star            \ wait for completion
-            jsr prepare_erase   \ prepare the erase operation
-            sta &B000           \ erase first sector
+            jsr prepare_erase        \ prepare the erase operation
+            sta &B000                \ erase next sector
             jsr wait_star            \ wait for completion
             
 .Dont_Erase_Main_Rom
             LDX     save_x
             DEX
             BPL     Blank_Loop
-            jsr osnewl          \ print a new line 
+            jsr     osnewl           \ print a new line 
             
             LDX     #$03
-            JSR     setbank     \ return to main RFS program bank
+            JSR     setbank          \ return to main RFS program bank
 
-\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-\            LDA     $F4         \ during testing
-\            STA     $FE05       \ reset calling ROM
-\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
             PLP
             RTS
 
@@ -104,7 +102,7 @@ uart_mcr = uart+12
 .wait_star
             jsr wait            \ wait for completion
             lda #'.'            \ print a * as progress indicator
-            jmp oswrch
+            jmp oswrch          \ using "." instead
 
 \ Prepare the erase operation for a sector in bank X. After returning from this subroutine
 \ immediatly write to the sector address.
@@ -128,10 +126,10 @@ uart_mcr = uart+12
 \ Wait until an operation has finished. I use the "toggle bit" method; this means that during the
 \ erase or program operation bit 6 will be toggled at every read cycle.
 .wait       lda &8000           \ load data
-            eor $8000
+            eor $8000           \ EOR with previous read
             and #&40            \ clear all bits except bit 6
-            bne wait        \ continue with next wait cycle if they are not equal
-.waitend    rts                 \ return to calling routine
+            bne wait            \ continue with next wait cycle if they are not equal
+            rts                 \ return to calling routine
 
 \ Select the active bank for writing a byte to. The bank number is in the X register
 .setbank    pha                 \ save A (it contains the byte that should be written)

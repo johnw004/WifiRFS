@@ -4,13 +4,24 @@
 \ As well as the source for the WRFS ROM this code includes RAM based routines for updating and recovery.
 \ Those sections follow this code at an offset of $1000 and will not be copied into the ROM.
 
+\ The filing system uses memory starting at $9000 in the program ROM up to $BFFF in the second "hidden" ROM
+\ This is mapped virtually as $5000 to $FFFF.
+\ $FFFF is always the end of the last file and other files grow downwards in memory
+\ This means that RFS will always see the latest version of a file first because it always searches from the beginning
+
+\ Files are conventional RFS files with the addition of 6 extra bytes at the end of each:
+\ 1.  A "*" to enable the RFS to verify the end of the file
+\ 2/3 A bigendian pointer to the start of the file
+\ 4/5 The bigendian length of the file data, ie, end address - start address
+\ 6.  Delete flag $FF, set to $00 when the file is deleted
+
 include "electron.asm"
 
  
 .romstart
 
         JMP     Recovery-$8000+dload      \ this is to allow the code to run for installation/recovery 
-                                          \ and will be replaced by nulls in the ROM        
+                                          \ and these 3 bytes will be replaced by nulls in the ROM        
         JMP     ServiceEntry
         
         EQUB    $82
@@ -34,7 +45,7 @@ include "electron.asm"
 .COPYSTR
         EQUS    "!WCOPY",$82,"  <fsp>",$0D,"  "    \ ! is a place marker for the command routine
 
-        EQUS    "!DELETE",$84," <fsp>",$0D,"  "    \ and negative values are pointers to command table
+        EQUS    "!DELETE",$84," <fsp>",$0D,"  "    \ and negative values are pointers to command table offset by $80
 
         EQUS    "!INFO",$86,$0D,"  "               \ both will be ignored by the print routine
 
@@ -57,21 +68,21 @@ include "electron.asm"
         EQUW    Do_INFO-1
         EQUW    Do_FREE-1
         EQUW    Do_FORMAT-1
-        EQUW    Do_DEFRAG-1
-        EQUW    Do_UPDATE-1
-        EQUW    Do_MANUAL-1
+        EQUW    Do_DEFRAG-1                       \ in defrag.asm
+        EQUW    Do_UPDATE-1                       \ in update.asm
+        EQUW    Do_MANUAL-1                       \ in update.asm
 
 .Boot_Command
         EQUS    "*E.!BOOT",$0D
         
-.AddPTR                                          \ add the accumulator to the ROM pointer for the
+.AddPTR                                          \ add the accumulator to the ROM pointer ($F6/F7) for the
         CLC                                      \ RFS services
         ADC     ROMptr
         STA     ROMptr
         BCC     AddPTR_End
         INC     ROMptr+1
         LDA     ROMptr+1
-        JSR     Update_Bank                      \ update the mfa and bank values for ROM access
+        JSR     Update_Bank                      \ update the mfa and bank values for ROM access, in write.asm
 .AddPTR_End
         RTS
         
@@ -84,7 +95,7 @@ include "electron.asm"
         BNE     Not_12
         TYA                                      \ service $12 initialise filing system
         PHA
-        CPY     #myFSno                          \ is it my FS number
+        CPY     #myFSno                          \ is it my FS number?
         BNE     Leave_Not_Claim2
         BEQ     Continue_03
         
@@ -112,7 +123,7 @@ include "electron.asm"
         JSR     Wrom_Setup                       \ set up wrom vectors
         PLA
         PHA
-        TAY                                      \ was Y zero on entry
+        TAY                                      \ was Y zero on entry?
         BNE     Leave_03                 
         
         LDX     #LO(Boot_Command)                \ if so shift is pressed so auto boot
@@ -129,7 +140,7 @@ include "electron.asm"
 
 .Serv14_Slow                                     \ use conventional (slow) RFS routines
         LDA     ROMptr+1
-        JSR     Update_Bank                      \ update mfa and bank for ROM access
+        JSR     Update_Bank                      \ update mfa and bank for ROM access, in write.asm
         JSR     Read_Byte_From_F6                \ read byte using ROM pointers $F6,$F7
         TAY
         LDA     #$01                             \ inc ROM pointers
@@ -142,7 +153,7 @@ include "electron.asm"
 .Serv14                                          \ read byte from RFS
         LDA     serROM
         EOR     #15
-        CMP     $F4                              \ is it my ROM
+        CMP     $F4                              \ is it my ROM?
         BEQ     Its_Me
         PLA
         RTS
@@ -172,13 +183,13 @@ include "electron.asm"
 .Not_Seq                                         \ "fast RFS" routines developed by JG Harston
         PHP                                      \ save tube flag, C clear = tube, set = io
         LDA     ROMptr+1
-        JSR     Update_Bank                      \ update mfa and bank for ROM access
+        JSR     Update_Bank                      \ update mfa and bank for ROM access, in write.asm
 .Serv14_Loop1
         LDY     #$00       
         
 .Serv14_Loop        
         STY     count14
-        JSR     Read_Byte_From_F6                \ read byte
+        JSR     Read_Byte_From_F6                \ read byte, in write.asm
         LDY     count14
         PLP                                      \ get tube flag
         PHP
@@ -201,24 +212,24 @@ include "electron.asm"
         LDA     $3C9
         BEQ     Serv14_Finished                  \ if high byte of block length is 0, then finished
         
-        INC     $B1                              \ inc memory pointer
-        JSR     Read_Byte_From_F6                \ read byte
+        INC     $B1                              \ inc high byte of memory pointer
+        JSR     Read_Byte_From_F6                \ read byte, in write.asm
         CMP     #'#'
         BNE     Serv14_Last                      \ if it is not "#" this is the start of the last block header
         
         LDA     #$01
 .Serv14_Next
         JSR     AddPTR
-        BCC     Serv14_Loop1                     \ inc the pointer and repeat
+        BCC     Serv14_Loop1                     \ inc the pointer past "#" and repeat
         
 .Serv14_Last                                     \ last block header
         LDA     #$01
         JSR     AddPTR
-        JSR     Read_Byte_From_F6
+        JSR     Read_Byte_From_F6                \ in write.asm
         BNE     Serv14_Last                      \ advance pointer to 0 at end of filename
         LDA     #11
         JSR     AddPTR                           \ advance pointer to block length (lsb of data length)
-        JSR     Read_Byte_From_F6                \ read length
+        JSR     Read_Byte_From_F6                \ read length, in write.asm
         STA     $3C8                             \ set length in memory
         LDA     #$00
         STA     $3C9                             \ set msb to 0
@@ -260,9 +271,9 @@ include "electron.asm"
 \ service 13
         TYA                                      \ initiate read from RFS
         EOR     #15
-        CMP     $F4                              \ is it my ROM
+        CMP     $F4                              \ is it my ROM?
         BCC     Not_4
-        JSR     Check_WROM                       \ is WROM active
+        JSR     Check_WROM                       \ is WROM active?
         BNE     Not_4
         LDA     #heappage                        \ set the heap page in paged RAM
         STA     pagereg
@@ -274,7 +285,7 @@ include "electron.asm"
         STA     ROMptr                           \ load the ROM pointer at $F6,$F7 with the internal pointer
         LDA     rstart+1
         STA     ROMptr+1
-        JSR     Update_Bank                      \ update the mfa and bank for the ROM
+        JSR     Update_Bank                      \ update the mfa and bank for the ROM, in write.asm
         JMP     Leave_Claim1
         
 .Print_String2                                   \ print the inline text following the JSR, ending with $EA
@@ -303,35 +314,35 @@ include "electron.asm"
 \ service 9                                      \ help call
         TYA
         PHA
-        LDX     #$00
-        LDA     (line),Y
+        LDX     #$00                             \ pointer to COMMSTR
+        LDA     (line),Y                         \ get next character in command line
         CMP     #$20
         BCS     Help_Loop
-        JSR     osnewl
+        JSR     osnewl                           \ if next character is a cr print TITLESTR and version
         LDY     #$00
         JSR     Print_String
         INY
         JSR     Print_String
-        LDY     #HELPSTR-TITLESTR
+        LDY     #HELPSTR-TITLESTR                \ then print "WROM"
         JSR     Print_String
         BEQ     Leave_Not_Claim
         
 .Help_Loop
-        LDA     (line),Y
+        LDA     (line),Y                         \ compare command line entry with "WROM"
         AND     #$DF
         CMP     COMMSTR,X
         BNE     Leave_Not_Claim
         INY
         INX
-        CPX     #$04
+        CPX     #$04                             \ if 4 characters have matched continue
         BNE     Help_Loop
         
-        LDY     #COMMSTR2-TITLESTR
+        LDY     #COMMSTR2-TITLESTR               \ print help string
         JSR     Print_String
         BEQ     Leave_Claim
         
 .Leave_Not_Claim
-        PLA
+        PLA                                      \ leave service without claiming it
         TAY
         LDX     $F4
 .Not_4
@@ -341,13 +352,13 @@ include "electron.asm"
 .Info_Code
         SEC
         CLV
-        JMP     New_Cat
+        JMP     New_Cat                          \ in write.asm
 
-.Do_INFO
+.Do_INFO                                         \ *INFO command
         JSR     Info_Code
         
 .Leave_Claim
-        PLA
+        PLA                                      \ leave service and claim with A=0
         TAY
 .Leave_Claim1
         LDX     $F4
@@ -364,16 +375,16 @@ include "electron.asm"
 \ service 4
         TYA
         PHA
-        LDX     #$00
+        LDX     #$00                             \ search command line for matching commands
 .Comm_Loop
         LDA     COMMSTR,X
-        BEQ     Leave_Not_Claim
-        BMI     Select_Command
+        BEQ     Leave_Not_Claim                  \ if 0 no matching command has been found
+        BMI     Select_Command                   \ if negative a matching command has been found
         
         LDA     (line),Y
         AND     #$DF
         CMP     COMMSTR,X
-        BNE     Comm_Loop1
+        BNE     Comm_Loop1                       \ characters dont match so try next command
         
         INY
         INX
@@ -382,34 +393,34 @@ include "electron.asm"
 .Select_Command
         DEY
         TAX
-        LDA     Comm_Table-$7F,X
-        PHA
+        LDA     Comm_Table-$7F,X                 \ get pointers from table offset by $80
+        PHA                                      \ push on stack
         LDA     Comm_Table-$80,X
         PHA
         LDA     #heappage
         STA     pagereg
-        RTS
+        RTS                                      \ "RTS" to routine
         
 .Check_WROM
-        LDA     osfvec+1              \ determine whether vectors are set for this rom
+        LDA     osfvec+1                         \ determine whether vectors are set for this rom
         CMP     #$FF
-        BNE     Leave_Check_WROM
+        BNE     Leave_Check_WROM                 \ is osfile vector extended?
         
         LDA     extvectab+ext_osfile+2
-        CMP     $F4
+        CMP     $F4                              \ is it extended to this ROM?
 .Leave_Check_WROM        
-        RTS
+        RTS                                      \ zero if they are
 
 .Comm_Loop1
         INX
         LDA     COMMSTR,X
-        BPL     Comm_Loop1
+        BPL     Comm_Loop1                       \ advance until a negative value
         CMP     #$80
-        BEQ     Point_To_Copy
+        BEQ     Point_To_Copy                    \ if it is $80 (end of WROM) need to advance to COPYSTR
         CMP     #$82
-        BNE     Allow_WROM_Commands
-        JSR     Check_WROM
-        BNE     Leave_Not_Claim
+        BNE     Allow_WROM_Commands              \ commands WROM and WCOPY are allowed even if WROM not already selected
+        JSR     Check_WROM                       \ otherwise check if WROM selected
+        BNE     Leave_Not_Claim                  \ if not, leave without claiming
         BEQ     Allow_WROM_Commands
 
 .Point_To_Copy
@@ -418,22 +429,22 @@ include "electron.asm"
 .Allow_WROM_Commands
         PLA
         PHA
-        TAY                                 \ return y to start
+        TAY                                      \ return y to start 
         
 .Comm_Loop2
         INX
         LDA     COMMSTR,X
         CMP     #'!'
-        BNE     Comm_Loop2
+        BNE     Comm_Loop2                       \ advance pointer until "!" found
         INX
-        BNE     Comm_Loop
+        BNE     Comm_Loop                        \ try next command
         
-.Do_DELETE
-        JSR     Get_Filename_From_Line
-        BCS     Leave_Delete
-        JSR     Bit_New_Cat
+.Do_DELETE                                       \ *DELETE command
+        JSR     Get_Filename_From_Line           \ in vectors.asm
+        BCS     Leave_Delete                     \ leave if syntax error
+        JSR     Bit_New_Cat                      \ with c clear, in write.asm
         BVC     Leave_Delete
-        JSR     Not_Found
+        JSR     Not_Found                        \ if v set file not found
         
 .Leave_Delete
         JMP     Leave_Claim
@@ -443,7 +454,7 @@ include "electron.asm"
         EQUS    $0D,"Not Found",$0D,$0D,$EA
         RTS
         
-.Hex_Dec
+.Hex_Dec                                         \ convert hex value in $100/$101 to decimal value in $102 to $104
         LDA     #$00
         STA     $102
         STA     $103
@@ -469,7 +480,7 @@ include "electron.asm"
         CLD
         RTS
 
-.Print_Dec5
+.Print_Dec5                                      \ print 5 decimal digits from hex in $100/1       
         JSR     Hex_Dec
         LDA     $104
         JSR     printhex_l1
@@ -478,7 +489,7 @@ include "electron.asm"
         LDA     $102
         JMP     printhex
         
-.Print_Dec3
+.Print_Dec3                                      \ print 3 decimal digits from hex in $100/1
         JSR     Hex_Dec
         LDA     $103
         JSR     printhex_l1
@@ -486,29 +497,29 @@ include "electron.asm"
         JMP     printhex
         
         
-.Do_FREE
-        JSR     Check_Start
+.Do_FREE                                         \ *FREE command
+        JSR     Check_Start                      \ check start pointer is correct
         LDA     rstart
         SEC
-        SBC     #LO(Data)
+        SBC     #LO(Data)                        \ subtract start of filing system
         STA     $100
         LDA     rstart+1
-        SBC     #HI(Data)-$40
-        STA     $101
+        SBC     #HI(Data)-$40                    \ difference between actual location ($9000 in ROM) and virtual ($5000 in WRFS)
+        STA     $101                             \ stored in $100/1
         LDY     #$00
-        JSR     Print_String
+        JSR     Print_String                     \ print title
         JSR     Print_String2
 
         EQUS    $0D,"   Free Space: &",$EA
         
-        LDA     $101
+        LDA     $101                             \ print hex value
         JSR     printhex
         LDA     $100
         JSR     printhex
         LDA     #' '
         JSR     osasci
         JSR     osasci
-        JSR     Print_Dec5
+        JSR     Print_Dec5                       \ print 5 digit decimal value
         JSR     osnewl
         
 .Format_Leave
@@ -516,7 +527,7 @@ include "electron.asm"
         JMP     Leave_Claim
         
 .Yes_No
-        JSR     osrdch
+        JSR     osrdch                           \ wait for "y", "N", Return or Escape to be pressed
         BCS     Yes_No_Escape
         CLV
         CMP     #'y'
@@ -528,7 +539,7 @@ include "electron.asm"
         BEQ     Yes_No_Leave
         BNE     Yes_No
         
-.Yes_No_Escape
+.Yes_No_Escape                                   \ acknowledge Escape press               
         LDA     #$7E
         JSR     osbyte
         JSR     Print_String2
@@ -541,10 +552,10 @@ include "electron.asm"
         CLC
         
 .Yes_No_Leave
-        RTS                              \ V set if error, C set if no, C clear if yes
+        RTS                                      \ V set if escape, C set if no, C clear if yes
 
         
-.Do_FORMAT
+.Do_FORMAT                                       \ *FORMAT command
         JSR     Print_String2
 
         EQUS    "Are you sure? y/N",$EA
@@ -559,14 +570,14 @@ include "electron.asm"
         JMP     Format_Leave
         
 .Format_Main
-        LDX     #$03
-        JSR     Format_Setup
-        JSR     formatcode
-        LDA     #heappage
+        LDX     #$03                            \ X=3 means erase the filing system area
+        JSR     Format_Setup                    \ load format code
+        JSR     formatcode                      \ call format code
+        LDA     #heappage                       \ reset the paged ram to the heap page
         STA     pagereg
         RTS
 
-.Format_Setup
+.Format_Setup                                   \ load format code into page $FD of paged ram
         LDA     #formatpage
         STA     pagereg
         LDY     #$00
@@ -579,7 +590,7 @@ include "electron.asm"
         RTS
         
         
-.Format_Cleanup
+.Format_Cleanup                                \ reset the start pointer and the check pointer
         LDA     #$FF
         STA     rstart
         STA     rstart+1
@@ -589,21 +600,21 @@ include "electron.asm"
         STA     rcheck+1
         RTS
 
-.Do_WROM 
+.Do_WROM                                       \ *WROM command
         JSR     Wrom_Setup
         JMP     Leave_Claim
 
-.Wrom_Setup
-        STA     rcheck
+.Wrom_Setup                                    \ because setup needs to be called from several places make it a subroutine
+        STA     rcheck                         \ change the check value to force rechecking of the start pointer
         
-        LDA     #$8D                       \ select RFS
+        LDA     #$8D                           \ select RFS (WRFS is an extension of RFS)
         JSR     osbyte
         
-        JSR     Set_Vecs
+        JSR     Set_Vecs                       \ set the WRFS vectors
         
         LDA     #$8F
         LDX     #$0F
-        JMP     osbyte
+        JMP     osbyte                         \ signal a change of filing system to other ROMs
 
 .Vec_Tab
         EQUB    LO(osfvec)
@@ -629,33 +640,32 @@ include "electron.asm"
         EQUB    HI(New_Osfind)
         EQUB    HI(New_Osfsc)
         
-.Set_Vecs
+.Set_Vecs                                    \ set up extended vectors
         LDX     #$00
 .Set_Vecs_Loop
-        LDY     Vec_Tab,X
+        LDY     Vec_Tab,X                    \ get location of vector in page $200
         LDA     #$FF
         STA     $201,Y
         LDA     Vec_Tab1,X
-        STA     $200,Y
+        STA     $200,Y                       \ save extended vector ($FFxx) in page $200
         TAY
-        LDA     Vec_Tab2,X
+        LDA     Vec_Tab2,X                   \ store new vector values in extended vector area
         STA     extvectab,Y
         LDA     Vec_Tab3,X
         STA     extvectab+1,Y
         LDA     $F4
-        STA     extvectab+2,Y
+        STA     extvectab+2,Y                \ store this rom number in extended vector area
         INX
         CPX     #Vec_Tab1-Vec_Tab
-        BNE     Set_Vecs_Loop
+        BNE     Set_Vecs_Loop                \ repeat until all done
         
 .Opt_10
-        LDA     $E3                  \ *OPT 1,0 clears bits 7,6,3,2 of &E3
+        LDA     $E3                          \ *OPT 1,0 clears bits 7,6,3,2 of &E3
         AND     #$33
         STA     $E3
         RTS
                 
-.Load_Rwcode
-        \ load rw code into ram
+.Load_Rwcode                                 \ load rw code into ram page $FF
         LDA     #rwpage
         STA     pagereg
         
@@ -668,14 +678,12 @@ include "electron.asm"
         BNE     Rw_Load_Loop
         
         LDA     #heappage
-        STA     pagereg
+        STA     pagereg                      \ reset ram page to heap
         RTS
 
-.Check_Start
-        JSR     Load_Rwcode
-        
-        \ check has start been corrupted
-        LDA     rstart
+.Check_Start                                 \ load rw code and check if start pointer has been corrupted                   
+        JSR     Load_Rwcode                
+        LDA     rstart                       \ by comparing it with the EOR'ed values in rcheck
         EOR     #$55
         CMP     rcheck
         BNE     Find_Start
@@ -685,17 +693,17 @@ include "electron.asm"
         BNE     Find_Start
         RTS        
 
-.Find_Start
+.Find_Start                                  \ update rstart pointer
         TXA
         PHA
         TYA
         PHA
-        LDA     #$FF
+        LDA     #$FF                         \ begin at end $FFFF
         STA     rfsptr
         STA     rfsptr+1
 
 .Find_Start_Loop
-        SEC
+        SEC                                  \ pointer to start of file is 5 bytes before end
         LDA     rfsptr
         STA     rstart
         SBC     #$05
@@ -703,26 +711,26 @@ include "electron.asm"
         LDA     rfsptr+1
         STA     rstart+1
         SBC     #$00
-        STA     rfsptr+1
+        STA     rfsptr+1                     \ subtract 5 from end of file
         
-        JSR     Update_And_Read_Byte
+        JSR     Update_And_Read_Byte         \ in write.asm
         PHA
         JSR     Inc_And_Read_Byte
         TAY
-        PLA
+        PLA                                  \ read bigendian start pointer, high byte in A, low byte in Y
         CMP     #$FF
-        BEQ     High_Byte_Is_FF
+        BEQ     High_Byte_Is_FF              \ if both are $FF there are no more files and the start has been reached
 
 .Low_Byte_Not_FF
         STA     rfsptr+1
         STY     rfsptr
-        BCC     Find_Start_Loop
+        BCC     Find_Start_Loop              \ if not $FFFF loop to next file
         
 .High_Byte_Is_FF
         CPY     #$FF
         BNE     Low_Byte_Not_FF
 
-        LDA     rstart
+        LDA     rstart                       \ start reached so set rcheck value by EORing with rstart
         EOR     #$55
         STA     rcheck
         LDA     rstart+1
