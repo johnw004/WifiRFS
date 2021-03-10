@@ -13,7 +13,7 @@
         LDX     #Manual_String-Update_String
         JSR     Load_Wget                      \ load manual string into oscli buffer  
         JSR     Print_String2
-        EQUB    12,14,$EA                      \ clear screen and set page scrolling
+        EQUB    22,7,14,$EA                      \ clear screen and set page scrolling
         
         JSR     Do_Wget                        \ print manual
         JMP     Leave_Claim
@@ -32,8 +32,6 @@
         RTS
 
 .Do_UPDATE                                     \ *UPDATE command
-        JSR     Load_Rwcode \ * Note to self: this may not be necessary
-
         LDX     #$00
         JSR     Load_Wget                      \ load update string into oscli buffer
         
