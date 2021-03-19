@@ -40,6 +40,7 @@
         SBC     #$03                           \ data length is 3 bytes before next file
         STA     rfsptr
         LDA     $3CC
+        SBC     #$00
         STA     rfsptr+1
         
         JSR     Update_And_Read_Byte           \ read data length and store in memory
@@ -122,14 +123,16 @@
         
         LDA     #$01
         BVC     Osfile_5_Found                \ if file found set A=1, else set A=0
-        LDA     #$00
-.Osfile_5_Found
-        JMP     Leave_Osfile2
+        BVS     Osfile_Not_Found
         
 .Osfile_FF
         BVC     Osfile_FF_Found
         JSR     Not_Found                     \ if file not found print and leave with A=0
+        
+.Osfile_Not_Found
         LDA     #$00
+        
+.Osfile_5_Found
         JMP     Leave_Osfile2
         
 .Osfile_FF_Found
