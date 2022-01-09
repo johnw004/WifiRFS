@@ -4,6 +4,8 @@
 \ second part of update sequence.
 \ this part is not put in ROM and runs in RAM at an offset of $1000 from the start of the ROM code
 
+\ 7-jan-2022 change to call defrag after recovery if other rom has corrupted bottom of rfs
+
 
 \ enters here after rom has been downloaded
         JMP     Update2-$8000+dload
@@ -22,6 +24,9 @@
         
         PLP                                 \ from PHP at start of format code
                 
+        LDA     Corrupt_Flag-$8000+dload
+        BNE     Dont_Save_Boot              \ dont try osfiles if rfs was corrupted
+        
         LDA     #$05
         JSR     Call_Osfile3-$8000+dload    \ check if there is an existing !BOOT file
         CMP     #$01
@@ -35,18 +40,18 @@
         STY     rcheck
         
         JSR     Print_String2
-        EQUS    $0D,"Update Done",$0D,$EA
+        EQUS    $0D,"Update/Recovery Done",$0D,$EA
         
         LDA     Update_Flag-$8000+dload 
-        BEQ     Leave_Update2
+        BEQ     Leave_Update2               \ if the update flag is not 0 this is a recovery/install
 
-        JSR     Print_String2               \ if the update flag is not 0 this is a recovery/install so print warning
-        EQUS    "If this replaced a different ROM",$0D,"you will need to FORMAT",$0D,$EA
-        
         JMP     Recovery_Return-$8000+dload \ return to recovery routine
         
 .Update_Flag
         EQUB    $00                         \ will be set to non zero by recovery code
+        
+.Corrupt_Flag
+        EQUB    0                           \ will be set non zero if rom corrupted
         
 .Update2
         LDY     #$00                        \ clear the crc registers
@@ -216,11 +221,30 @@
 .Wifi_Slot_Found
         INX                                   \ wifi found so inc slot number
         STX     $F4                           \ store in $F4
+        STX     $FE05
+        LDA     $9000
+        AND     $9001
+        CMP     #$FF                          \ check that start of rfs area has not been overwritten
+        BEQ     Not_Corrupted
+        
+        DEC     Corrupt_Flag-$8000+dload      \ set corrupt flag
+        
+.Not_Corrupted
         JMP     Update2-$8000+dload           \ jump to Update2
         
         
-.Recovery_Return
-        PLA                                   \ returning from recovery
+.Recovery_Return                              \ returning from recovery
+        LDA     Corrupt_Flag-$8000+dload
+        BEQ     Not_Corrupted2
+        JSR     Print_String2
+        EQUS    $0D,"Corrupted by previous ROM so",$0D,"repairing filing system.",$0D
+        EQUS    "This may result in some file loss",$0D,$EA
+
+        JSR     Recovery_Defrag-$8000+dload   \ call defrag 
+        JSR     Find_Start                    \ make sure start is set 
+
+.Not_Corrupted2
+        PLA
         STA     $F4                           \ reset calling slot
         STA     $FE05
         PLP                                   \ clear interrupts
@@ -231,9 +255,20 @@
         STA     dload,Y
         DEY
         BPL     Reinstate_Jmp_Code
+
+        LDA     #0
+        STA     Update_Flag-$8000+dload       \ reset flags to zero
+        STA     Corrupt_Flag-$8000+dload
+
         
         RTS
-        
+  
+.Recovery_Defrag
+        PHA
+        PHA                                   \ adjust stack for service call
+        SEC                                   \ Set C flag to show defrag called from restore
+        JMP     Force_Defrag
+      
         
 
 

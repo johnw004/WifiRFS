@@ -15,6 +15,9 @@
 \ 4/5 The bigendian length of the file data, ie, end address - start address
 \ 6.  Delete flag $FF, set to $00 when the file is deleted
 
+
+\ 6-jan-2022 changes to restore and defrag routines to remove any files that might have been corrupted by a different ROM.  
+
 include "electron.asm"
 
  
@@ -31,7 +34,7 @@ include "electron.asm"
         EQUB    01
 
 .TITLESTR
-        EQUS    "Wifi RFS ",$00,"0.1"
+        EQUS    "Wifi RFS ",$00,"0.2"
 
 .COPYR
         EQUS    $00,"(C)2021 John Wike",$00

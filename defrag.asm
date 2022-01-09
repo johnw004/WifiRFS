@@ -12,6 +12,9 @@
 \
 \ Once the copy has been made the whole filing system will be erased, then the files will be copied back from the ram.
 \
+
+\ 7-jan-2022 change defrag routine to also be called with C set from restore. If rfs start pointer is positive, ie
+\ in sideways ROM area, assume file has been corrupted during restore and stop copy process.
 \
 .Write_To_Ram
         PHA                          \ save A for writing
@@ -103,7 +106,7 @@
         
 .Dont_Defrag
         JSR     Print_String2
-        EQUS    $0D,"No dead space",$0D,$EA
+        EQUS    6,$0D,"No dead space",$0D,$EA   \ enable screen output
         
 .Dont_Defrag2
         JMP     Leave_Claim
@@ -114,15 +117,13 @@
         LDA     #21
         JSR     osasci                 \ VDU 21, disable screen output
         JSR     Info_Code              \ do INFO to get number of deleted files in $100/1 and dead space in delsp
-        LDA     #6
-        JSR     osasci                 \ enable screen output
 
         LDA    $100
         ORA    $101
         BEQ    Dont_Defrag             \ if no deleted files print message and leave
         
         JSR    Print_String2           \ print deleted files and dead space
-        EQUS   $0D,"    ",$EA
+        EQUS   6,$0D,"    ",$EA        \ enable screen output
         JSR    Print_Dec3
         JSR    Print_String2
         EQUS   " Deleted",$0D,"  &",$EA
@@ -134,8 +135,12 @@
         EQUS   " Dead Space",$0D,$0D, "Defrag now? y/N",$0D,$EA
         JSR    Yes_No                   \ give option to continue
         BVS    Dont_Defrag2
+
+.Dont_Defrag3
         BCS    Dont_Defrag2
 
+.Force_Defrag                          \ Called from restore. C clear from above or set from restore
+        PHP
         LDA     #$FF                   \ start at end $FFFF
         STA     rfsptr
         STA     rfsptr+1               \ set rfs pointer
@@ -171,11 +176,21 @@
         INY
         CPY     #$05
         BNE     Defrag_Loop1
-        
+
+        PLP        
         LDA     fstart
+        BMI     Defrag_Not_InRom
+        BCS     Defrag_1_Done1         \ if restore and start address positive, finish here
+
+.Defrag_Not_InRom
+        PHP
         AND     fstart+1
         CMP     #$FF
         BNE     Defrag_Continue        \ if the new start address is $FFFF the start of the files has been reached so go
+        PLP
+        BCS     Dont_Defrag3           \ if from restore leave, else go to next stage
+
+.Defrag_1_Done1
         JMP     Defrag_1_Done          \ to next stage
         
 .Defrag_Continue
@@ -242,8 +257,8 @@
 .Dont_Sub_100
         JSR     Sub_Ptr                     \ subtract length of last block
         LDA     hlength
-        JSR     Sub_Ptr                     \ subtract length of header
-        LDA     #$08
+        CLC                     \ subtract length of header
+        ADC     #$08
         JSR     Sub_Ptr                     \ subtract 8 for checksum of last block and 6 extra bytes of WRFS info
                                             \ ramptr now points to start of last header
         JSR     Modify_Header               \ modify header of last block
@@ -300,9 +315,10 @@
         LDA     ramptr
         SBC     scratch
         STA     ramptr
-        LDA     ramptr+1
-        SBC     #$00
-        STA     ramptr+1
+        BCS     Sub_Ptr_End
+        DEC     ramptr+1
+
+.Sub_Ptr_End
         RTS
         
         
