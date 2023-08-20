@@ -27,15 +27,18 @@ uart_mcr = uart+12
                                                 \ entry to write byte
             JMP     Write_Byte                  \note that this is assembled independently so these are local references
             
-
             JMP     Read_Byte                   \ entry to read byte
-            
+
+.rwflag     EQUB    0                           \ modified to 8 for new mfa during install
+
+
                                                 \ entry point from format code during update
             LDA     $F4                         \ so this always points to Bank 3
             STA     banktable
-            LDA     #$00
+            LDA     rwflag
             STA     mfatable
             
+            LDA     #0
             STA     zrfsptr
             STA     rfssrc
             LDA     #$80
@@ -78,6 +81,7 @@ uart_mcr = uart+12
             LDY     #$00
             LDA     (zrfsptr),Y                  \ read byte from eeprom
             
+            LDY     rwflag
             STY     uart_mcr                     \ reset Bank 3 to return to program
             LDY     $F4
             STY     $FE05
@@ -122,6 +126,7 @@ uart_mcr = uart+12
             PLA                  \ restore A
             STA     (zrfsptr),Y  \ write to EEPROM
             
+            LDY     rwflag
             STY     uart_mcr     \ reset Bank 3 to return to program
             LDY     $F4
             STY     $FE05

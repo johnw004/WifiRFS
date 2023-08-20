@@ -1,7 +1,7 @@
 \ ROM Filing System for Electron Wifi Board
 \ (C) 2021 John Wike
 
-Based on:
+\Based on:
 \ Electron Wifi Sideway ROM
 \ Settings, definitions and constants
 
@@ -143,6 +143,8 @@ Based on:
         dload       = $2000      \ download location for update
         wgetbfr     = $100
         
+        wflagram    = dload+&FF7 \ 0 for old mfa, 8 for new mfa
+        wflagrom    = &8FF7
         etagram     = dload+$FF8 \ crc of etag of downloaded file
         etagrom     = $8FF8      \ crc of previous etag
                 

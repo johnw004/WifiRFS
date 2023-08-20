@@ -156,16 +156,19 @@
         
 .Update_Bank                            \ enter with msb of address in A
         PHA
+        ROL    A
+        ROL    A                        \ bit 14 in C
+        PHP 
+        ROR    A                        \ bit 15 in C
         LDX    #rwpage                  \ set ram to rw page
         STX    pagereg
    
-        LDX    #$00
-        ROL    A
-        BCC    Update_Mfa               \ if bit 15 (bit 7 of msb) = 0, mfa = 0, else 8
-        LDX    #$08
+        LDA    wflagrom
+        BCC    Update_Mfa               \ if bit 15 (bit 7 of msb) = 0, old mfa = 0, else 8, new mfa = 8, else 0
+        EOR    #$08
 .Update_Mfa
-        STX    mfatable
-        ROL    A                        \ if bit 14 (bit 6 of msb) was 0, bank = lower bank of pair, else higher
+        STA    mfatable
+        PLP                            \ if bit 14 (bit 6 of msb) was 0, bank = lower bank of pair, else higher
         LDA    $F4
         AND    #$06                     \ mask out bit 0 of ROM bank
         ADC    #$00                     \ add in bit 14 (bit 6 of msb) of address

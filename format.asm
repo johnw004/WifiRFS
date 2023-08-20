@@ -34,9 +34,11 @@ uart_mcr = uart+12
             
 .Format_Start            
             JMP     Format
-                        
+
+.fmtflag    EQUB    0          \ changed to 8 for new mfa during install
+
 .Jmp_To_Rwpage
-            STA     pagereg    \ when updating WRFS this will cause a jump to the rw code page at $FD06
+            STA     pagereg    \ when updating WRFS this will cause a jump to the rw code page at $FD07
 
 .mfatabl
             EQUB    8,8,0,0    \ these are the values to be written to uart_mcr for each bank
@@ -66,24 +68,20 @@ uart_mcr = uart+12
             BCS     Dont_Erase_Program          \ if X=3 dont erase the program section
             
 .Erase_Prog
-            jsr     prepare_erase               \ prepare the erase operation
-            sta     &8000                       \ erase first sector
-            jsr     wait_star                   \ wait for completion
+            lda     #&80
+            jsr     erase_wait
             ldx     save_x
             LDA     #rwpage                     \ prepare for jump to rw page
             cpx     #$03
             beq     Jmp_To_Rwpage               \ if X=3 here this is an update operation so jump to rw page       
             
 .Dont_Erase_Program
-            jsr prepare_erase        \ prepare the erase operation
-            sta &9000                \ erase next sector
-            jsr wait_star            \ wait for completion
-            jsr prepare_erase        \ prepare the erase operation
-            sta &A000                \ erase next sector
-            jsr wait_star            \ wait for completion
-            jsr prepare_erase        \ prepare the erase operation
-            sta &B000                \ erase next sector
-            jsr wait_star            \ wait for completion
+            lda     #&90
+            jsr     erase_wait
+            lda     #&A0
+            jsr     erase_wait
+            lda     #&B0
+            jsr     erase_wait
             
 .Dont_Erase_Main_Rom
             LDX     save_x
@@ -97,9 +95,12 @@ uart_mcr = uart+12
             PLP
             RTS
 
-
-\ End of routine
-.wait_star
+.erase_wait
+            sta set_sector+2         \ this is in ram so can self modify
+            jsr prepare_erase        \ prepare the erase operation
+            
+.set_sector
+            sta &9000                \ erase next sector modified as needed
             jsr wait            \ wait for completion
             lda #'.'            \ print a * as progress indicator
             jmp oswrch          \ using "." instead
@@ -132,8 +133,14 @@ uart_mcr = uart+12
             rts                 \ return to calling routine
 
 \ Select the active bank for writing a byte to. The bank number is in the X register
-.setbank    pha                 \ save A (it contains the byte that should be written)
+.setbank    clc
+.setbank0
+            pha                 \ save A (it contains the byte that should be written)
             lda mfatabl,x      \ load MFA value
+            bcs dont_modify
+            eor fmtflag
+            
+.dont_modify
             sta uart_mcr        \ write to UART (this sets A15 of the EEPROM)
             lda #&0F
             sta &FE05
@@ -146,14 +153,16 @@ uart_mcr = uart+12
 
 \ Write a value to &5555 of the EEPROM (not the 6502 address!)
 .write5555  ldx #1              \ &5555 is in bank 1
-            jsr setbank         \ select bank 1
+            sec
+            jsr setbank0        \ select bank 1
             sta &9555           \ write to the right address (this is the 6502 address in SWR space)
             ldx save_x          \ restore X register
             rts                 \ return to calling routine
 
 \ Write a value to &2AAA of the EEPROM (not the 6502 address!)
 .write2AAA  ldx #0              \ &2AAA is in bank 0
-            jsr setbank         \ select bank 0
+            sec
+            jsr setbank0        \ select bank 0
             sta &AAAA           \ write to the right address (this is the 6502 address in SWR space)
             ldx save_x          \ restore X register
             rts                 \ return to calling routine

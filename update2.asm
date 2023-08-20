@@ -54,6 +54,20 @@
         EQUB    0                           \ will be set non zero if rom corrupted
         
 .Update2
+        LDY     wflagrom
+        BPL     Update2a
+        LDY     #0
+
+.Update2a
+        TYA
+        BEQ     old_mfa
+        LDA     #8
+        
+.old_mfa
+        STA     wflagram                      \ set main flag for mfa version - 0 = old, 8 = new
+        STA     Format_Start-$8000+dload+3    \ set format flag for mfa version
+        STA     Rw_Start-$8000+dload+6        \ set rw flag for mfa version
+        
         LDY     #$00                        \ clear the crc registers
         STY     crc16
         STY     crc16+1
@@ -219,6 +233,7 @@
         RTS
         
 .Wifi_Slot_Found
+        LDY     &BFFE
         INX                                   \ wifi found so inc slot number
         STX     $F4                           \ store in $F4
         STX     $FE05
@@ -230,7 +245,7 @@
         DEC     Corrupt_Flag-$8000+dload      \ set corrupt flag
         
 .Not_Corrupted
-        JMP     Update2-$8000+dload           \ jump to Update2
+        JMP     Update2a-$8000+dload           \ jump to Update2
         
         
 .Recovery_Return                              \ returning from recovery
