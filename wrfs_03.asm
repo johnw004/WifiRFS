@@ -16,7 +16,9 @@
 \ 6.  Delete flag $FF, set to $00 when the file is deleted
 
 
-\ 6-jan-2022 changes to restore and defrag routines to remove any files that might have been corrupted by a different ROM.  
+\ 6-jan-2022 changes to restore and defrag routines to remove any files that might have been corrupted by a different ROM.
+
+\ 20-aug-2023 changes to several modules to allow working with the modified memory mapping for the mfa output of the TL16C2552 UART
 
 include "electron.asm"
 
